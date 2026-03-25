@@ -5,29 +5,50 @@ const { log } = require('../utils/logger');
 
 class DataService {
     constructor() {
-        // 只读资源：打包后在 app.asar 内，开发时在项目根目录
-        const appPath = app.getAppPath();
-        this.dbPath = path.join(appPath, 'hex_data.json');
-        
-        // 可写缓存：存放在用户的 AppData 目录
-        this.buildsDir = path.join(app.getPath('userData'), 'cache', 'hero-builds');
-        
         this.winRates = {};
+        this.userDataPath = app.getPath('userData');
+        this.onlineDbPath = path.join(this.userDataPath, 'hex_data_online.json');
+        this.buildsDir = path.join(this.userDataPath, 'cache', 'hero-builds');
+        
         this.loadDatabase();
     }
 
-    loadDatabase() {
-        log('Data', `Loading database from: ${this.dbPath}`);
+    async loadDatabase() {
         try {
-            if (fs.existsSync(this.dbPath)) {
-                this.winRates = JSON.parse(fs.readFileSync(this.dbPath, 'utf8'));
-                log('Data', `[SUCCESS] Database loaded. Found ${Object.keys(this.winRates).length} heroes.`);
-            } else {
-                log('Data', `[ERROR] Database file not found at ${this.dbPath}`);
+            // 1. 优先加载本地已更新的在线数据 (最鲜活)
+            if (fs.existsSync(this.onlineDbPath)) {
+                this.winRates = JSON.parse(fs.readFileSync(this.onlineDbPath, 'utf8'));
+                log('Data', `Loaded updated winrates from AppData. Total: ${Object.keys(this.winRates).length}`);
+            }
+
+            // 2. 如果 AppData 里没有，则加载打包内置的保底数据
+            if (Object.keys(this.winRates).length === 0) {
+                try {
+                    const data = require('../hex_data.json');
+                    this.winRates = data.heroes || data;
+                    log('Data', `Loaded internal winrates. Total: ${Object.keys(this.winRates).length}`);
+                } catch (e) {
+                    log('Data', `Internal load failed: ${e.message}`);
+                }
             }
         } catch (e) {
-            log('Data', `[ERROR] Load database failed: ${e.message}`);
+            log('Data', `Fatal load error: ${e.message}`);
         }
+    }
+
+    // --- 自动更新机制 ---
+    async syncWinRates(scraper) {
+        // 如果数据量太少，或者距离上次更新太久 (目前设为每次冷启动尝试更新)
+        log('Data', 'Triggering background data sync...');
+        const newData = await scraper.scrapeAllHeroWinRates();
+        if (newData && Object.keys(newData).length > 50) {
+            this.winRates = newData;
+            // 持久化到 AppData
+            fs.writeFileSync(this.onlineDbPath, JSON.stringify(newData, null, 2));
+            log('Data', 'Online winrates synced and saved.');
+            return true;
+        }
+        return false;
     }
 
     isToday(filePath) {
@@ -37,13 +58,10 @@ class DataService {
             const today = new Date().toDateString();
             const fileDate = new Date(stats.mtime).toDateString();
             return today === fileDate;
-        } catch (e) {
-            return false;
-        }
+        } catch (e) { return false; }
     }
 
     async getHeroBuild(heroId, scraper) {
-        log('Data', `Querying build for hero ID: ${heroId}`);
         try {
             const baseInfo = this.winRates[heroId.toString()];
             const filePath = path.join(this.buildsDir, `${heroId}.json`);
@@ -52,17 +70,14 @@ class DataService {
             if (this.isToday(filePath)) {
                 try {
                     detailData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-                    log('Data', `[CACHE] Found local cache for hero ${heroId}`);
                 } catch (e) {}
             }
 
             if (!detailData && scraper) {
-                log('Data', `[SCRAPE] Starting live scrape for hero ${heroId}`);
                 detailData = await scraper.scrapeHextechData(heroId);
                 if (detailData) {
                     if (!fs.existsSync(this.buildsDir)) fs.mkdirSync(this.buildsDir, { recursive: true });
                     fs.writeFileSync(filePath, JSON.stringify(detailData, null, 2));
-                    log('Data', `[SUCCESS] Scraped and cached for ${heroId}`);
                 }
             }
 

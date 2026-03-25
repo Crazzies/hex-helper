@@ -89,6 +89,11 @@ app.whenReady().then(async () => {
     
     globalShortcut.register(config.get('shortcut'), () => toggleWindow());
 
+    // 启动后执行一次后台静默数据同步
+    setTimeout(() => {
+        dataService.syncWinRates(scraper);
+    }, 5000);
+
     lcu.startPolling();
 
     lcu.on('connected', async () => {

@@ -11,19 +11,61 @@ class ScraperService {
 
     loadTierMap() {
         try {
-            // 生产环境下从 app.getAppPath() 准确定位
-            const appPath = app.getAppPath();
-            const mapPath = path.join(appPath, 'augments_tier_map.json');
-            
-            if (fs.existsSync(mapPath)) {
-                this.tierMap = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
-                log('Scraper', `Tier map loaded: ${Object.keys(this.tierMap).length} items.`);
-            } else {
-                log('Scraper', `[ERROR] Tier map file not found at ${mapPath}`);
+            this.tierMap = require('../augments_tier_map.json');
+            log('Scraper', `Tier map loaded via require: ${Object.keys(this.tierMap).length} items.`);
+        } catch (e) {
+            try {
+                const backupPath = path.join(app.getAppPath(), 'src/main/augments_tier_map.json');
+                if (fs.existsSync(backupPath)) this.tierMap = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
+            } catch(e2) {}
+        }
+    }
+
+    // --- 新增：抓取所有英雄的基础胜率列表 (解决数据滞后问题) ---
+    async scrapeAllHeroWinRates() {
+        log('Scraper', 'Starting full hero winrate sync...');
+        const win = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
+        try {
+            await win.loadURL('https://hextech.dtodo.cn/zh-CN/champion-stats');
+            await new Promise(r => setTimeout(r, 6000)); // 等待全量列表加载
+
+            const data = await win.webContents.executeJavaScript(`
+                (() => {
+                    const heroes = {};
+                    const rows = document.querySelectorAll('tr');
+                    rows.forEach(row => {
+                        const link = row.querySelector('a[href*="/champion-stats/"]');
+                        if (!link) return;
+                        
+                        const idMatch = link.href.match(/champion-stats\\/(\\d+)/);
+                        if (!idMatch) return;
+                        const id = idMatch[1];
+
+                        const img = link.querySelector('img');
+                        const name = (img?.alt || link.title || link.innerText || "").trim();
+                        
+                        // 寻找胜率文本
+                        const wrMatch = row.innerText.match(/(\\d+\\.?\\d*)%/);
+                        const winRate = wrMatch ? wrMatch[0] : "??%";
+
+                        if (name) {
+                            heroes[id] = { name, winRate };
+                        }
+                    });
+                    return heroes;
+                })()
+            `);
+
+            if (Object.keys(data).length > 50) {
+                log('Scraper', `Successfully scraped ${Object.keys(data).length} heroes.`);
+                return data;
             }
         } catch (e) {
-            log('Scraper', `Failed to load tier map: ${e.message}`);
+            log('Scraper', `Global sync failed: ${e.message}`);
+        } finally {
+            if (!win.isDestroyed()) win.destroy();
         }
+        return null;
     }
 
     async scrapeHeroDetailFromBlitz(championId) {
