@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>HexHelper</title>
+    <style>
+        body { 
+            margin: 0; padding: 12px; font-family: "Microsoft YaHei", sans-serif; 
+            background: rgba(0, 0, 0, 0.9); color: #fff; 
+            border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); 
+            overflow: hidden; height: 580px; user-select: none;
+            -webkit-app-region: drag;
+        }
+        .container { height: 100%; display: flex; flex-direction: column; }
+        .status, .tag-container, #bench-list, .section-title, .hero-item, .settings-panel, .btn { -webkit-app-region: no-drag; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .status { font-size: 11px; color: #00d2ff; font-weight: bold; flex: 1; text-align: left; }
+
+        .hero-item { display: flex; flex-direction: column; margin-bottom: 8px; background: rgba(255,255,255,0.05); padding: 8px; border-radius: 6px; }
+        .hero-row { display: flex; justify-content: space-between; }
+        .name { font-size: 13px; font-weight: bold; }
+        .wr { font-size: 13px; color: #ffca28; }
+        .section-title { font-size: 11px; color: #00d2ff; margin: 12px 0 6px; text-transform: uppercase; border-left: 2px solid #00d2ff; padding-left: 6px; }
+        .tag-container { display: flex; flex-wrap: wrap; gap: 4px; }
+        .tag { padding: 4px 8px; background: rgba(26, 35, 126, 0.6); border-radius: 4px; font-size: 11px; border: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; }
+        .tag .val { margin-left: 6px; color: #ffca28; font-weight: bold; }
+        .tag.hex-p { background: rgba(171, 71, 188, 0.6); }
+        .tag.hex-g { background: rgba(255, 160, 0, 0.6); }
+        .tag.hex-s { background: rgba(120, 144, 156, 0.6); }
+        
+        #build-view, #bench-view, #settings-view { display: none; flex: 1; overflow-y: auto; }
+        .active { display: block !important; }
+
+        .settings-panel { padding: 10px; font-size: 12px; }
+        .setting-item { margin-bottom: 15px; }
+        .setting-item label { display: flex; justify-content: space-between; margin-bottom: 5px; color: #aaa; }
+        input[type="range"] { width: 100%; cursor: pointer; }
+        .btn { background: #00d2ff; color: #000; border: none; padding: 8px; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 10px; transition: 0.2s; }
+        .btn:active { transform: scale(0.98); }
+        .btn-danger { background: #ff5252; color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div id="status" class="status">Waiting for match...</div>
+        </div>
+        
+        <div id="bench-view" class="active">
+            <div class="section-title">备战席胜率 (Bench)</div>
+            <div id="bench-list"></div>
+        </div>
+
+        <div id="build-view">
+            <div id="hero-name-header" style="font-size: 16px; color: #ffca28; text-align: center; margin-bottom: 10px; font-weight: bold;"></div>
+            <div id="build-content">
+                <div class="section-title">情境装备 (Situational)</div>
+                <div id="situational" class="tag-container"></div>
+                <div class="section-title">棱彩海克斯 (Prismatic)</div>
+                <div id="prismatic" class="tag-container"></div>
+                <div class="section-title">黄金海克斯 (Gold)</div>
+                <div id="gold" class="tag-container"></div>
+                <div class="section-title">白银海克斯 (Silver)</div>
+                <div id="silver" class="tag-container"></div>
+            </div>
+        </div>
+
+        <div id="settings-view" class="settings-panel">
+            <div class="section-title">应用设置</div>
+            <div class="setting-item">
+                <label><span>窗口透明度</span><span id="val-opacity">0.9</span></label>
+                <input type="range" id="range-opacity" min="0.3" max="1.0" step="0.05" value="0.9">
+            </div>
+            <div class="setting-item">
+                <label><span>UI 缩放比例</span><span id="val-zoom">1.0</span></label>
+                <input type="range" id="range-zoom" min="0.5" max="1.5" step="0.1" value="1.0">
+            </div>
+            <button class="btn btn-danger" id="btn-clear-cache">清理本地抓取缓存数据</button>
+            <button class="btn" id="btn-close-settings">保存并返回</button>
+            <div style="margin-top: 20px; font-size: 10px; color: #555; text-align: center;">HEX-Helper v1.0.0</div>
+        </div>
+    </div>
+
+    <script>
+        const statusEl = document.getElementById('status');
+        const views = {
+            bench: document.getElementById('bench-view'),
+            build: document.getElementById('build-view'),
+            settings: document.getElementById('settings-view')
+        };
+        const heroHeader = document.getElementById('hero-name-header');
+
+        function showView(name) {
+            Object.keys(views).forEach(k => views[k].classList.remove('active'));
+            views[name].classList.add('active');
+        }
+
+        document.getElementById('btn-close-settings').onclick = () => showView('bench');
+
+        // 设置交互
+        const opRange = document.getElementById('range-opacity');
+        const opVal = document.getElementById('val-opacity');
+        opRange.oninput = (e) => {
+            const v = parseFloat(e.target.value);
+            opVal.innerText = v;
+            window.electronAPI.updateConfig({ opacity: v });
+        };
+
+        const zoomRange = document.getElementById('range-zoom');
+        const zoomVal = document.getElementById('val-zoom');
+        zoomRange.oninput = (e) => {
+            const v = parseFloat(e.target.value);
+            zoomVal.innerText = v.toFixed(1);
+            window.electronAPI.updateConfig({ zoom: v });
+        };
+
+        document.getElementById('btn-clear-cache').onclick = () => {
+            if(confirm('确定要清空所有已抓取的出装缓存吗？')) {
+                window.electronAPI.clearCache();
+            }
+        };
+
+        // LCU 事件
+        window.electronAPI.onStatus((text) => { statusEl.innerText = text; });
+        window.electronAPI.onSwitchView((view) => showView(view));
+        window.electronAPI.onReset(() => {
+            showView('bench');
+            heroHeader.innerText = "";
+            ['situational','prismatic','gold','silver'].forEach(id => {
+                const el = document.getElementById(id);
+                if(el) el.innerHTML = "";
+            });
+            statusEl.innerText = "Waiting for match...";
+        });
+
+        window.electronAPI.onBench((heroes) => {
+            document.getElementById('bench-list').innerHTML = heroes.map(h => `
+                <div class="hero-item"><div class="hero-row"><span class="name">${h.name}</span><span class="wr">${h.winRate}</span></div></div>
+            `).join('');
+        });
+
+        window.electronAPI.onBuild((data) => {
+            showView('build');
+            heroHeader.innerText = `${data.name || 'Unknown'} (${data.winRate || '??%'})`;
+            const render = (id, list, className) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.innerHTML = (!list || list.length === 0) ? '<span style="color:#555">None</span>' : 
+                    list.map(h => `<span class="tag ${className}">${h.name || h}<span class="val">${h.winRate || ''}</span></span>`).join('');
+            };
+            render('situational', data.situationalItems, '');
+            render('prismatic', data.prismatic, 'hex-p');
+            render('gold', data.gold, 'hex-g');
+            render('silver', data.silver, 'hex-s');
+        });
+    </script>
+</body>
+</html>
