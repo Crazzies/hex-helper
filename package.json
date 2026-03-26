@@ -1,6 +1,6 @@
 {
   "name": "hex-helper",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "英雄联盟海克斯大乱斗辅助工具",
   "main": "src/main/index.js",
   "scripts": {
