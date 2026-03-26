@@ -1,3 +1,7 @@
+/**
+ * LCU (League Client Update) 通信服务
+ * 负责通过命令行提取游戏客户端的端口与认证令牌，并监听游戏阶段与英雄选择变化。
+ */
 const { execSync } = require('child_process');
 const https = require('https');
 const EventEmitter = require('events');
@@ -7,13 +11,16 @@ class LcuService extends EventEmitter {
     constructor() {
         super();
         this.lcuData = null;
-        this.agent = new https.Agent({ rejectUnauthorized: false });
+        this.agent = new https.Agent({ rejectUnauthorized: false }); // 忽略 LCU 自签名证书错误
         this.lastPhase = null;
         this.lastChampionId = null;
         this.pollTimer = null;
     }
 
-    // 提取密钥
+    /**
+     * 自动通过命令行提取 LCU 连接凭证
+     * 原理：LeagueClientUx.exe 启动时会在命令行参数中包含 --app-port 和 --remoting-auth-token
+     */
     async connect() {
         try {
             const command = 'wmic process where name="LeagueClientUx.exe" get commandline';
@@ -44,6 +51,9 @@ class LcuService extends EventEmitter {
         return false;
     }
 
+    /**
+     * 发送 HTTPS 请求到 LCU 本地 API
+     */
     async request(url) {
         if (!this.lcuData) return null;
         return new Promise((resolve) => {
@@ -68,13 +78,16 @@ class LcuService extends EventEmitter {
         });
     }
 
+    /**
+     * 开启心跳轮询，监听阶段切换与英雄选择
+     */
     startPolling() {
         if (this.pollTimer) return;
         this.pollTimer = setInterval(async () => {
             const connected = await this.connect();
             if (!connected) return;
 
-            // 监听阶段变化
+            // 1. 监听游戏流阶段 (Lobby -> ChampSelect -> InProgress)
             const phase = await this.request('/lol-gameflow/v1/gameflow-phase');
             if (phase && phase !== this.lastPhase) {
                 this.lastPhase = phase;
@@ -82,7 +95,7 @@ class LcuService extends EventEmitter {
                 log('LCU', `Phase changed: ${phase}`);
             }
 
-            // 监听英雄变化
+            // 2. 监听玩家当前正在查看/选择的英雄 ID
             if (phase === 'ChampSelect' || phase === 'InProgress') {
                 const champId = await this.request('/lol-champ-select/v1/current-champion');
                 if (typeof champId === 'number' && champId !== this.lastChampionId) {
@@ -93,7 +106,7 @@ class LcuService extends EventEmitter {
             } else {
                 this.lastChampionId = null;
             }
-        }, 3000);
+        }, 3000); // 3秒/次的心跳检测，在性能与实时性间取得平衡
     }
 }
 
