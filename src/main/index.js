@@ -18,6 +18,7 @@ let registeredShortcut = config.get('shortcut'); // 当前已注册的快捷键
 let dragHookStarted = false;
 let dragKeyActive = false;
 let lastToggleAt = 0;
+let lastBenchData = [];
 const TOGGLE_COOLDOWN_MS = 350;
 
 function applyClickThrough(enabled) {
@@ -331,50 +332,101 @@ app.whenReady().then(async () => {
         }
     }
 
+    async function updateBenchData() {
+        const session = await lcu.request('/lol-champ-select/v1/session');
+        if (!session || typeof session !== 'object') {
+            log('Main', 'ChampSelect session unavailable');
+            // fallback: use current champion id if available
+            if (lcu.lastChampionId && lcu.lastChampionId > 0) {
+                const hero = dataService.winRates[lcu.lastChampionId.toString()];
+                const fallbackData = [{
+                    id: lcu.lastChampionId,
+                    name: hero ? hero.name : (champMap[lcu.lastChampionId.toString()] || `ID: ${lcu.lastChampionId}`),
+                    winRate: hero ? hero.winRate : '??%'
+                }];
+                lastBenchData = fallbackData;
+                mainWindow.webContents.send('update-bench', fallbackData);
+                log('Main', `Fallback bench data from current champion: ${lcu.lastChampionId}`);
+                return;
+            }
+            if (lastBenchData.length > 0) {
+                mainWindow.webContents.send('update-bench', lastBenchData);
+            } else {
+                mainWindow.webContents.send('update-bench', [{ name: '等待选人数据...', winRate: '--' }]);
+            }
+            return;
+        }
+
+        const myTeam = Array.isArray(session.myTeam) ? session.myTeam : [];
+        const benchChampions = Array.isArray(session.benchChampions) ? session.benchChampions : [];
+        log('Main', `ChampSelect session loaded: team=${myTeam.length}, bench=${benchChampions.length}`);
+
+        // 获取我的英雄ID
+        const myId = myTeam.find(m => m.cellId === session.localPlayerCellId)?.championId;
+
+        // 获取所有队友的英雄ID（包括板凳席）
+        const teamIds = myTeam
+            .map(m => m.championId)
+            .filter(id => id && id > 0);
+
+        const benchIds = benchChampions.map(c => c.championId).filter(id => id && id > 0);
+
+        // 合并所有英雄ID（我的+队友+板凳），去重
+        const allIds = [...new Set([myId, ...teamIds, ...benchIds])].filter(id => id);
+
+        if (allIds.length === 0) {
+            log('Main', 'ChampSelect session empty');
+            // fallback: use current champion id if available
+            if (lcu.lastChampionId && lcu.lastChampionId > 0) {
+                const hero = dataService.winRates[lcu.lastChampionId.toString()];
+                const fallbackData = [{
+                    id: lcu.lastChampionId,
+                    name: hero ? hero.name : (champMap[lcu.lastChampionId.toString()] || `ID: ${lcu.lastChampionId}`),
+                    winRate: hero ? hero.winRate : '??%'
+                }];
+                lastBenchData = fallbackData;
+                mainWindow.webContents.send('update-bench', fallbackData);
+                log('Main', `Fallback bench data from current champion: ${lcu.lastChampionId}`);
+                return;
+            }
+            if (lastBenchData.length > 0) {
+                mainWindow.webContents.send('update-bench', lastBenchData);
+            } else {
+                mainWindow.webContents.send('update-bench', [{ name: '暂无英雄数据', winRate: '--' }]);
+            }
+            return;
+        }
+
+        // 获取每个英雄的胜率信息
+        const displayData = allIds.map(id => {
+            const hero = dataService.winRates[id.toString()];
+            // 解析胜率为数值用于排序
+            let winRateNum = 0;
+            if (hero && hero.winRate) {
+                const match = hero.winRate.match(/(\d+\.?\d*)/);
+                if (match) winRateNum = parseFloat(match[1]);
+            }
+            return {
+                id: id,
+                name: hero ? hero.name : (champMap[id.toString()] || `ID: ${id}`),
+                winRate: hero ? hero.winRate : "??%",
+                winRateNum: winRateNum,
+                isMe: id === myId // 标记是否是自己选择的英雄
+            };
+        });
+
+        // 按胜率从高到低排序
+        displayData.sort((a, b) => b.winRateNum - a.winRateNum);
+
+        lastBenchData = displayData;
+        mainWindow.webContents.send('update-bench', displayData);
+        log('Main', `Bench updated: ${displayData.length} heroes`);
+    }
+
     // 选人阶段逻辑 - 获取所有队友英雄并按胜率排序
     setInterval(async () => {
         if (lcu.lastPhase === 'ChampSelect') {
-            const session = await lcu.request('/lol-champ-select/v1/session');
-            if (session) {
-                const myTeam = session.myTeam || [];
-                const benchChampions = session.benchChampions || [];
-                
-                // 获取我的英雄ID
-                const myId = myTeam.find(m => m.cellId === session.localPlayerCellId)?.championId;
-                
-                // 获取所有队友的英雄ID（包括板凳席）
-                const teamIds = myTeam
-                    .map(m => m.championId)
-                    .filter(id => id && id > 0);
-                
-                const benchIds = benchChampions.map(c => c.championId).filter(id => id && id > 0);
-                
-                // 合并所有英雄ID（我的+队友+板凳），去重
-                const allIds = [...new Set([myId, ...teamIds, ...benchIds])].filter(id => id);
-                
-                // 获取每个英雄的胜率信息
-                const displayData = allIds.map(id => {
-                    const hero = dataService.winRates[id.toString()];
-                    // 解析胜率为数值用于排序
-                    let winRateNum = 0;
-                    if (hero && hero.winRate) {
-                        const match = hero.winRate.match(/(\d+\.?\d*)/);
-                        if (match) winRateNum = parseFloat(match[1]);
-                    }
-                    return {
-                        id: id,
-                        name: hero ? hero.name : (champMap[id.toString()] || `ID: ${id}`),
-                        winRate: hero ? hero.winRate : "??%",
-                        winRateNum: winRateNum,
-                        isMe: id === myId // 标记是否是自己选择的英雄
-                    };
-                });
-                
-                // 按胜率从高到低排序
-                displayData.sort((a, b) => b.winRateNum - a.winRateNum);
-                
-                mainWindow.webContents.send('update-bench', displayData);
-            }
+            updateBenchData();
         }
     }, 2000);
 });
