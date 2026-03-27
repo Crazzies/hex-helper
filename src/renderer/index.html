@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <title>HexHelper</title>
@@ -20,9 +20,10 @@
         .status { font-size: 11px; color: #00d2ff; font-weight: bold; flex: 1; text-align: left; }
 
         .hero-item { display: flex; flex-direction: column; margin-bottom: 8px; background: rgba(255,255,255,0.05); padding: 8px; border-radius: 6px; }
-        .hero-row { display: flex; justify-content: space-between; }
+        .hero-row { display: flex; justify-content: space-between; align-items: center; }
         .name { font-size: 13px; font-weight: bold; }
         .wr { font-size: 13px; color: #ffca28; }
+        .me-tag { font-size: 9px; background: #00d2ff; color: #000; padding: 2px 4px; border-radius: 3px; margin-left: 6px; }
         .section-title { font-size: 11px; color: #00d2ff; margin: 12px 0 6px; text-transform: uppercase; border-left: 2px solid #00d2ff; padding-left: 6px; }
         .tag-container { display: flex; flex-wrap: wrap; gap: 4px; }
         .tag { padding: 4px 8px; background: rgba(26, 35, 126, 0.6); border-radius: 4px; font-size: 11px; border: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; }
@@ -32,15 +33,28 @@
         .tag.hex-s { background: rgba(120, 144, 156, 0.6); }
         
         #build-view, #bench-view, #settings-view { display: none; flex: 1; overflow-y: auto; }
-        .active { display: block !important; }
+        .active { display: block; }
 
         .settings-panel { padding: 10px; font-size: 12px; }
         .setting-item { margin-bottom: 15px; }
         .setting-item label { display: flex; justify-content: space-between; margin-bottom: 5px; color: #aaa; }
         input[type="range"] { width: 100%; cursor: pointer; }
+        
         .btn { background: #00d2ff; color: #000; border: none; padding: 8px; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 10px; transition: 0.2s; }
         .btn:active { transform: scale(0.98); }
         .btn-danger { background: #ff5252; color: #fff; }
+        .btn-secondary { background: #666; color: #fff; }
+        
+        .setting-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+        .setting-row label { color: #aaa; font-size: 12px; }
+        .setting-row select, .setting-row input[type="text"] { 
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); 
+            color: #fff; padding: 6px; border-radius: 4px; font-size: 12px; width: 120px; 
+        }
+        
+        .conflict-warning { color: #ff5252; font-size: 11px; margin-top: 4px; display: none; }
+        .conflict-warning.show { display: block; }
+
     </style>
 </head>
 <body>
@@ -50,7 +64,7 @@
         </div>
         
         <div id="bench-view" class="active">
-            <div class="section-title">备战席胜率 (Bench)</div>
+            <div class="section-title">备战席 & 队友英雄 (按胜率排序)</div>
             <div id="bench-list"></div>
         </div>
 
@@ -68,19 +82,49 @@
             </div>
         </div>
 
+
         <div id="settings-view" class="settings-panel">
             <div class="section-title">应用设置</div>
+            
             <div class="setting-item">
                 <label><span>窗口透明度</span><span id="val-opacity">0.9</span></label>
                 <input type="range" id="range-opacity" min="0.3" max="1.0" step="0.05" value="0.9">
             </div>
+            
             <div class="setting-item">
                 <label><span>UI 缩放比例</span><span id="val-zoom">1.0</span></label>
                 <input type="range" id="range-zoom" min="0.5" max="1.5" step="0.1" value="1.0">
             </div>
-            <button class="btn btn-danger" id="btn-clear-cache">清理本地抓取缓存数据</button>
-            <button class="btn" id="btn-close-settings">保存并返回</button>
-            <div style="margin-top: 20px; font-size: 10px; color: #555; text-align: center;">HEX-Helper v1.0.0</div>
+            
+            <div class="setting-row">
+                <label>显示/隐藏快捷键</label>
+                <input type="text" id="input-shortcut" value="Alt+V" placeholder="如: Alt+V, Ctrl+H">
+                <div id="shortcut-conflict" class="conflict-warning">快捷键冲突</div>
+            </div>
+            
+            <div class="setting-row">
+                <label>拖动窗口按键</label>
+                <select id="select-drag-key">
+                    <option value="Ctrl">Ctrl</option>
+                    <option value="Alt">Alt</option>
+                    <option value="Shift">Shift</option>
+                    <option value="None">无（禁用拖动）</option>
+                </select>
+            </div>
+            
+            <div class="setting-row">
+                <label>窗口默认穿透</label>
+                <select id="select-click-through">
+                    <option value="true">是 (可穿透点击)</option>
+                    <option value="false">否 (可点击)</option>
+                </select>
+            </div>
+            
+            <button class="btn" id="btn-save-settings" type="button">保存设置</button>
+            <button class="btn btn-secondary" id="btn-cancel-settings" type="button">取消更改</button>
+            <button class="btn btn-danger" id="btn-clear-cache" type="button">清理本地缓存数据</button>
+            
+            <div style="margin-top: 20px; font-size: 10px; color: #555; text-align: center;">HEX-Helper v1.0.1</div>
         </div>
     </div>
 
@@ -92,13 +136,84 @@
             settings: document.getElementById('settings-view')
         };
         const heroHeader = document.getElementById('hero-name-header');
+        
+        // 临时存储原始配置，用于取消功能
+        let originalConfig = {};
+        
 
         function showView(name) {
-            Object.keys(views).forEach(k => views[k].classList.remove('active'));
+            Object.keys(views).forEach(k => {
+                views[k].classList.remove('active');
+            });
             views[name].classList.add('active');
+            window.electronAPI?.notifyView?.(name);
         }
 
-        document.getElementById('btn-close-settings').onclick = () => showView('bench');
+        // 加载配置并显示
+        async function loadConfig() {
+            const config = await window.electronAPI.getConfig();
+            originalConfig = { ...config };
+            
+            
+            document.getElementById('range-opacity').value = config.opacity || 0.85;
+            document.getElementById('val-opacity').innerText = config.opacity || 0.85;
+            document.getElementById('range-zoom').value = config.zoom || 1.0;
+            document.getElementById('val-zoom').innerText = config.zoom || 1.0;
+            document.getElementById('input-shortcut').value = config.shortcut || 'Alt+V';
+            document.getElementById('select-drag-key').value = config.dragKey || 'Ctrl';
+            document.getElementById('select-click-through').value = String(config.clickThrough !== false);
+        }
+
+        // 保存设置
+        document.getElementById('btn-save-settings').onclick = async () => {
+            const newConfig = {
+                opacity: parseFloat(document.getElementById('range-opacity').value),
+                zoom: parseFloat(document.getElementById('range-zoom').value),
+                shortcut: document.getElementById('input-shortcut').value.trim(),
+                dragKey: document.getElementById('select-drag-key').value,
+                clickThrough: document.getElementById('select-click-through').value === 'true'
+            };
+            
+            // 检查快捷键冲突
+            const check = await window.electronAPI.checkShortcutConflict(newConfig.shortcut);
+            if (check.isConflict) {
+                alert(check.message);
+                return;
+            }
+            
+            await window.electronAPI.setConfig(newConfig);
+            originalConfig = { ...newConfig };
+            
+            showView('bench');
+        };
+
+        // 取消更改
+        document.getElementById('btn-cancel-settings').onclick = () => {
+            // 恢复原始值
+            document.getElementById('range-opacity').value = originalConfig.opacity || 0.85;
+            document.getElementById('val-opacity').innerText = originalConfig.opacity || 0.85;
+            document.getElementById('range-zoom').value = originalConfig.zoom || 1.0;
+            document.getElementById('val-zoom').innerText = originalConfig.zoom || 1.0;
+            document.getElementById('input-shortcut').value = originalConfig.shortcut || 'Alt+V';
+            document.getElementById('select-drag-key').value = originalConfig.dragKey || 'Ctrl';
+            document.getElementById('select-click-through').value = String(originalConfig.clickThrough !== false);
+            showView('bench');
+        };
+
+        // 快捷键输入实时检测冲突
+        document.getElementById('input-shortcut').oninput = async (e) => {
+            const shortcut = e.target.value.trim();
+            const check = await window.electronAPI.checkShortcutConflict(shortcut);
+            const warningEl = document.getElementById('shortcut-conflict');
+            if (check.isConflict) {
+                warningEl.innerText = check.message;
+                warningEl.classList.add('show');
+            } else {
+                warningEl.classList.remove('show');
+            }
+        };
+
+        // 设置按钮
 
         // 设置交互
         const opRange = document.getElementById('range-opacity');
@@ -106,7 +221,6 @@
         opRange.oninput = (e) => {
             const v = parseFloat(e.target.value);
             opVal.innerText = v;
-            window.electronAPI.updateConfig({ opacity: v });
         };
 
         const zoomRange = document.getElementById('range-zoom');
@@ -114,7 +228,6 @@
         zoomRange.oninput = (e) => {
             const v = parseFloat(e.target.value);
             zoomVal.innerText = v.toFixed(1);
-            window.electronAPI.updateConfig({ zoom: v });
         };
 
         document.getElementById('btn-clear-cache').onclick = () => {
@@ -125,7 +238,14 @@
 
         // LCU 事件
         window.electronAPI.onStatus((text) => { statusEl.innerText = text; });
-        window.electronAPI.onSwitchView((view) => showView(view));
+        window.electronAPI.onSwitchView((view) => {
+            if (view === 'settings') {
+                loadConfig();
+                showView('settings');
+            } else {
+                showView(view);
+            }
+        });
         window.electronAPI.onReset(() => {
             showView('bench');
             heroHeader.innerText = "";
@@ -138,7 +258,12 @@
 
         window.electronAPI.onBench((heroes) => {
             document.getElementById('bench-list').innerHTML = heroes.map(h => `
-                <div class="hero-item"><div class="hero-row"><span class="name">${h.name}</span><span class="wr">${h.winRate}</span></div></div>
+                <div class="hero-item">
+                    <div class="hero-row">
+                        <span class="name">${h.name}${h.isMe ? '<span class="me-tag">我</span>' : ''}</span>
+                        <span class="wr">${h.winRate}</span>
+                    </div>
+                </div>
             `).join('');
         });
 
