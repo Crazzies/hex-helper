@@ -141,11 +141,14 @@
         let originalConfig = {};
         
 
+        let currentView = 'bench';
+
         function showView(name) {
             Object.keys(views).forEach(k => {
                 views[k].classList.remove('active');
             });
             views[name].classList.add('active');
+            currentView = name;
             window.electronAPI?.notifyView?.(name);
         }
 
@@ -257,6 +260,9 @@
         });
 
         window.electronAPI.onBench((heroes) => {
+            if (currentView !== 'settings') {
+                showView('bench');
+            }
             document.getElementById('bench-list').innerHTML = heroes.map(h => `
                 <div class="hero-item">
                     <div class="hero-row">

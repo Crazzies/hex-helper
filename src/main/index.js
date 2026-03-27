@@ -298,6 +298,8 @@ app.whenReady().then(async () => {
         if (lcu.lastPhase) handlePhaseChange(lcu.lastPhase);
     }, 5000);
 
+    let buildFetchInFlight = false;
+
     async function handlePhaseChange(phase) {
         mainWindow.webContents.send('status', `Phase: ${phase}`);
         
@@ -311,22 +313,26 @@ app.whenReady().then(async () => {
         if (['InProgress', 'GameStart'].includes(phase)) {
             mainWindow.webContents.send('switch-view', 'build');
             const id = lcu.lastChampionId;
-            if (id && id !== lastHeroBuildId) {
+            if (id && id !== lastHeroBuildId && !buildFetchInFlight) {
                 const heroFromDB = dataService.winRates[id.toString()];
                 const name = heroFromDB ? heroFromDB.name : (champMap[id.toString()] || `ID: ${id}`);
                 
                 log('Main', `New build needed for: ${name}`);
                 mainWindow.webContents.send('status', `Loading ${name}...`);
-                
+
+                // 先显示基础信息，避免空白
+                mainWindow.webContents.send('update-build', {
+                    name: name,
+                    winRate: heroFromDB ? heroFromDB.winRate : '??%',
+                    isFallback: true
+                });
+                lastHeroBuildId = id;
+
+                buildFetchInFlight = true;
                 const build = await dataService.getHeroBuild(id, scraper);
+                buildFetchInFlight = false;
                 if (build) {
                     mainWindow.webContents.send('update-build', build);
-                    lastHeroBuildId = id;
-                } else {
-                    mainWindow.webContents.send('update-build', {
-                        name: name, winRate: heroFromDB ? heroFromDB.winRate : '??%', isFallback: true
-                    });
-                    lastHeroBuildId = id;
                 }
             }
         }
