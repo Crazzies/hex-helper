@@ -6,7 +6,7 @@ const lcu = require('./services/lcu-service');
 const dataService = require('./services/data-service');
 const scraper = require('./services/scraper-service');
 const config = require('./services/config-service');
-const { log, chcp, readLog, getLogFilePath } = require('./utils/logger');
+const { log, chcp, readLog, getLogFilePath, setLogOptions } = require('./utils/logger');
 
 app.commandLine.appendSwitch('ignore-certificate-errors');
 
@@ -251,6 +251,12 @@ ipcMain.handle('set-config', async (event, newConfig) => {
     if (newConfig.clickThrough !== undefined && !mainWindow.isSettingsOpen) {
         applyClickThrough(newConfig.clickThrough);
     }
+    if (newConfig.logRetentionDays !== undefined || newConfig.logMaxFiles !== undefined) {
+        setLogOptions({
+            retentionDays: newConfig.logRetentionDays ?? config.get('logRetentionDays'),
+            maxFiles: newConfig.logMaxFiles ?? config.get('logMaxFiles')
+        });
+    }
     
     return true;
 });
@@ -261,6 +267,10 @@ ipcMain.handle('check-shortcut-conflict', async (event, shortcut) => {
 
 ipcMain.on('renderer-error', (_event, message) => {
     log('Renderer', message);
+});
+
+ipcMain.on('preload-ready', () => {
+    log('Main', 'Preload ready');
 });
 
 ipcMain.on('update-config', (event, newConfig) => {
@@ -284,6 +294,10 @@ app.whenReady().then(async () => {
     createWindow();
     createTray();
     setupDragKeyHook();
+    setLogOptions({
+        retentionDays: config.get('logRetentionDays'),
+        maxFiles: config.get('logMaxFiles')
+    });
     
     // 注册初始快捷键
     registerShortcut(config.get('shortcut'));

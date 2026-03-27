@@ -16,5 +16,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 快捷键相关
     checkShortcutConflict: (shortcut) => ipcRenderer.invoke('check-shortcut-conflict', shortcut),
     // 渲染层错误上报
-    reportRendererError: (message) => ipcRenderer.send('renderer-error', message)
+    reportRendererError: (message) => ipcRenderer.send('renderer-error', message),
+    notifyPreloadReady: () => ipcRenderer.send('preload-ready')
 });
+
+ipcRenderer.send('preload-ready');

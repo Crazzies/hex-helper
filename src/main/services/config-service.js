@@ -21,7 +21,9 @@ class ConfigService {
             shortcut: 'Alt+V',
             alwaysOnTop: true,
             dragKey: 'Ctrl',  // 用于拖动窗口的按键，默认为 Ctrl
-            clickThrough: true  // 窗口默认是否穿透
+            clickThrough: true,  // 窗口默认是否穿透
+            logRetentionDays: 7, // 日志保留天数
+            logMaxFiles: 10 // 日志文件最多保留数量
         };
         this.config = this.load();
         // 临时存储未保存的更改，用于取消功能
