@@ -53,6 +53,10 @@ class DataService {
      */
     async syncWinRates(scraper) {
         log('Data', 'Triggering background data sync...');
+        if (this.isToday(this.onlineDbPath)) {
+            log('Data', 'Online winrates already synced today. Skipping.');
+            return false;
+        }
         const newData = await scraper.scrapeAllHeroWinRates();
         if (newData && Object.keys(newData).length > 50) {
             this.winRates = newData;
