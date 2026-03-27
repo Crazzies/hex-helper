@@ -33,7 +33,7 @@
         .tag.hex-s { background: rgba(120, 144, 156, 0.6); }
         
         #build-view, #bench-view, #settings-view { display: none; flex: 1; overflow-y: auto; }
-        .active { display: block; }
+        #build-view.active, #bench-view.active, #settings-view.active { display: block; }
 
         .settings-panel { padding: 10px; font-size: 12px; }
         .setting-item { margin-bottom: 15px; }
@@ -119,6 +119,16 @@
                     <option value="false">否 (可点击)</option>
                 </select>
             </div>
+
+            <div class="setting-row">
+                <label>日志保留天数</label>
+                <input type="number" id="input-log-retention" min="1" max="30" value="7">
+            </div>
+
+            <div class="setting-row">
+                <label>日志文件数量</label>
+                <input type="number" id="input-log-max" min="1" max="50" value="10">
+            </div>
             
             <button class="btn" id="btn-save-settings" type="button">保存设置</button>
             <button class="btn btn-secondary" id="btn-cancel-settings" type="button">取消更改</button>
@@ -165,6 +175,8 @@
             document.getElementById('input-shortcut').value = config.shortcut || 'Alt+V';
             document.getElementById('select-drag-key').value = config.dragKey || 'Ctrl';
             document.getElementById('select-click-through').value = String(config.clickThrough !== false);
+            document.getElementById('input-log-retention').value = config.logRetentionDays || 7;
+            document.getElementById('input-log-max').value = config.logMaxFiles || 10;
         }
 
         // 保存设置
@@ -174,7 +186,9 @@
                 zoom: parseFloat(document.getElementById('range-zoom').value),
                 shortcut: document.getElementById('input-shortcut').value.trim(),
                 dragKey: document.getElementById('select-drag-key').value,
-                clickThrough: document.getElementById('select-click-through').value === 'true'
+                clickThrough: document.getElementById('select-click-through').value === 'true',
+                logRetentionDays: parseInt(document.getElementById('input-log-retention').value, 10),
+                logMaxFiles: parseInt(document.getElementById('input-log-max').value, 10)
             };
             
             // 检查快捷键冲突
@@ -200,6 +214,8 @@
             document.getElementById('input-shortcut').value = originalConfig.shortcut || 'Alt+V';
             document.getElementById('select-drag-key').value = originalConfig.dragKey || 'Ctrl';
             document.getElementById('select-click-through').value = String(originalConfig.clickThrough !== false);
+            document.getElementById('input-log-retention').value = originalConfig.logRetentionDays || 7;
+            document.getElementById('input-log-max').value = originalConfig.logMaxFiles || 10;
             showView('bench');
         };
 
@@ -299,3 +315,5 @@
             const message = `Renderer unhandledrejection: ${event.reason}`;
             window.electronAPI?.reportRendererError?.(message);
         });
+
+        window.electronAPI?.reportRendererError?.('Renderer script started');
