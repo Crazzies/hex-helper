@@ -70,7 +70,17 @@ class LcuService extends EventEmitter {
                 res.on('data', (chunk) => chunks.push(chunk));
                 res.on('end', () => {
                     const data = Buffer.concat(chunks).toString('utf8');
-                    try { resolve(JSON.parse(data)); } catch (e) { resolve(data.replace(/"/g, '')); }
+                    if (res.statusCode && res.statusCode >= 400) {
+                        log('LCU', `Request failed ${res.statusCode} for ${url}`);
+                        resolve(null);
+                        return;
+                    }
+                    try {
+                        resolve(JSON.parse(data));
+                    } catch (e) {
+                        log('LCU', `JSON parse error for ${url}: ${e.message}`);
+                        resolve(null);
+                    }
                 });
             });
             req.on('error', () => resolve(null));
