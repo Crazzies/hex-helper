@@ -7,4 +7,6 @@ All notable changes to the HEX-helper project will be documented here.
 - Add click-through drag toggle and settings-safe interaction mode.
 - Show teammates in champ select and sort by win rate.
 - Add log viewing via tray menu and improve log storage.
+- Add per-run log files with retention and max-file cleanup controls.
 - Improve data sync throttling to reduce in-game stutter.
+- Harden LCU request error handling to avoid empty UI states.
