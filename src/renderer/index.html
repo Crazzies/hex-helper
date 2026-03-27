@@ -290,3 +290,12 @@
     </script>
 </body>
 </html>
+        window.addEventListener('error', (event) => {
+            const message = `Renderer error: ${event.message} @ ${event.filename}:${event.lineno}:${event.colno}`;
+            window.electronAPI?.reportRendererError?.(message);
+        });
+
+        window.addEventListener('unhandledrejection', (event) => {
+            const message = `Renderer unhandledrejection: ${event.reason}`;
+            window.electronAPI?.reportRendererError?.(message);
+        });

@@ -121,6 +121,16 @@ function createWindow() {
     
     mainWindow.webContents.on('did-finish-load', () => {
         mainWindow.webContents.setZoomFactor(config.get('zoom'));
+        log('Main', 'Renderer loaded');
+        mainWindow.webContents.send('status', 'Renderer Ready');
+    });
+
+    mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+        log('Main', `Renderer failed: ${errorCode} ${errorDescription} ${validatedURL || ''}`);
+    });
+
+    mainWindow.webContents.on('render-process-gone', (_event, details) => {
+        log('Main', `Renderer process gone: ${details.reason}`);
     });
 
     // 监听鼠标事件用于拖动
@@ -175,17 +185,17 @@ ipcMain.on('switch-view', (event, view) => {
 });
 
 function showLogDialog() {
+    const logPath = getLogFilePath();
     const logContent = readLog(200);
     dialog.showMessageBox(mainWindow, {
         type: 'info',
         title: '日志查看',
-        message: '最近 200 行日志:',
+        message: `日志路径: ${logPath}`,
         detail: logContent || '暂无日志',
         buttons: ['确定', '打开日志文件'],
         defaultId: 0
     }).then(result => {
         if (result.response === 1) {
-            const logPath = getLogFilePath();
             require('electron').shell.openPath(logPath);
         }
     });
@@ -247,6 +257,10 @@ ipcMain.handle('set-config', async (event, newConfig) => {
 
 ipcMain.handle('check-shortcut-conflict', async (event, shortcut) => {
     return config.checkShortcutConflict(shortcut);
+});
+
+ipcMain.on('renderer-error', (_event, message) => {
+    log('Renderer', message);
 });
 
 ipcMain.on('update-config', (event, newConfig) => {
