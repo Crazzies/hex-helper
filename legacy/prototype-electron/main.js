@@ -4,8 +4,6 @@ const fs = require('fs');
 const lcu = require('./lcu_connector');
 const dataFetcher = require('./data_fetcher');
 
-app.commandLine.appendSwitch('ignore-certificate-errors');
-
 let overlayWindow;
 let champMap = {}; 
 

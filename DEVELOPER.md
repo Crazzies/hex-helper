@@ -7,7 +7,7 @@
 1. **状态监听**：`lcu-service` 轮询 LCU API，感应游戏阶段（Phase）和英雄 ID。
 2. **数据路由**：`index.js` 根据阶段切换视图，并调用 `data-service` 请求攻略。
 3. **攻略获取**：`data-service` 优先查缓存，失效则启动 `scraper-service` 进行 DOM 抓取。
-4. **分类与清洗**：`scraper-service` 抓取后，根据 `augments_tier_map.json` 进行品阶分类，并清洗冗余后缀。
+4. **分类与清洗**：`scraper-service` 抓取后，根据 `src/main/augments_tier_map.json` 进行品阶分类，并清洗冗余后缀。
 
 ## 2. 关键维护任务
 
@@ -16,10 +16,10 @@
 - 在设置面板点击“清理本地抓取缓存”。
 - 或者删除 `%APPDATA%\HexHelper\hex_data_online.json`。
 
-### 更新海克斯品阶映射 (`augments_tier_map.json`)
+### 更新海克斯品阶映射 (`src/main/augments_tier_map.json`)
 当游戏版本大更新引入全新海克斯时，需手动更新此文件以保证 UI 分类正确：
 1. 运行 `init-tier-map.js` (在开发环境下)。
-2. 将生成的新 JSON 覆盖根目录文件。
+2. 将生成的新 JSON 覆盖 `src/main/augments_tier_map.json`。
 
 ## 3. 生产环境资源定位
 由于打包后代码运行在 `.asar` 内部，所有文件读取遵循以下原则：

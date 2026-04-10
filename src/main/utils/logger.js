@@ -59,6 +59,24 @@ const getLogFilePath = () => logFile;
 
 let logDir = resolveLogDir();
 let logFile = path.join(logDir, buildLogFileName());
+let logQueue = [];
+let logFlushScheduled = false;
+
+const flushLogQueue = () => {
+    if (logQueue.length === 0) {
+        logFlushScheduled = false;
+        return;
+    }
+    const batch = logQueue.join('');
+    logQueue = [];
+    fs.appendFile(logFile, batch, () => {
+        if (logQueue.length > 0) {
+            setImmediate(flushLogQueue);
+        } else {
+            logFlushScheduled = false;
+        }
+    });
+};
 
 // 清理过期日志并限制日志文件数量
 const cleanupLogs = () => {
@@ -126,7 +144,11 @@ const log = (module, message, data = "") => {
         if (!fs.existsSync(logFile)) {
             logFile = path.join(logDir, buildLogFileName());
         }
-        fs.appendFileSync(logFile, logLine);
+        logQueue.push(logLine);
+        if (!logFlushScheduled) {
+            logFlushScheduled = true;
+            setImmediate(flushLogQueue);
+        }
     } catch (e) {}
 };
 

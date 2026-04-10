@@ -4,7 +4,7 @@ const path = require('path');
 
 // 保留的配置项用于冲突检测
 const RESERVED_SHORTCUTS = [
-    'Alt+V', 'Ctrl+C', 'Ctrl+V', 'Ctrl+Z', 'Ctrl+A', 'Ctrl+S',
+    'Ctrl+C', 'Ctrl+V', 'Ctrl+Z', 'Ctrl+A', 'Ctrl+S',
     'Ctrl+W', 'Ctrl+Q', 'Ctrl+T', 'Ctrl+Tab', 'Ctrl+Shift+Tab',
     'F5', 'F11', 'PrintScreen', 'Win', 'Alt+Tab', 'Alt+F4',
     'Ctrl+Alt+Delete', 'Escape'
@@ -93,14 +93,14 @@ class ConfigService {
 
         const normalized = shortcut.trim();
 
+        // 与当前配置相同，直接认为可用
+        if (this.config.shortcut && this.config.shortcut.toLowerCase() === normalized.toLowerCase()) {
+            return { isConflict: false, message: '快捷键未变更' };
+        }
+
         // 检查是否是保留的系统快捷键
         if (RESERVED_SHORTCUTS.some(s => s.toLowerCase() === normalized.toLowerCase())) {
             return { isConflict: true, message: `快捷键 ${normalized} 是系统保留的，不建议使用` };
-        }
-
-        // 检查是否与当前使用的快捷键冲突
-        if (this.config.shortcut && this.config.shortcut.toLowerCase() === normalized.toLowerCase()) {
-            return { isConflict: false, message: '快捷键未变更' };
         }
 
         return { isConflict: false, message: '快捷键可用' };

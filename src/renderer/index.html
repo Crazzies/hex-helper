@@ -51,6 +51,10 @@
             background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); 
             color: #fff; padding: 6px; border-radius: 4px; font-size: 12px; width: 120px; 
         }
+        .setting-row select option {
+            color: #111;
+            background: #fff;
+        }
         
         .conflict-warning { color: #ff5252; font-size: 11px; margin-top: 4px; display: none; }
         .conflict-warning.show { display: block; }
@@ -303,9 +307,7 @@
             render('gold', data.gold, 'hex-g');
             render('silver', data.silver, 'hex-s');
         });
-    </script>
-</body>
-</html>
+
         window.addEventListener('error', (event) => {
             const message = `Renderer error: ${event.message} @ ${event.filename}:${event.lineno}:${event.colno}`;
             window.electronAPI?.reportRendererError?.(message);
@@ -317,3 +319,6 @@
         });
 
         window.electronAPI?.reportRendererError?.('Renderer script started');
+    </script>
+</body>
+</html>

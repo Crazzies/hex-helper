@@ -23,5 +23,13 @@
 - **日志策略**：设置中可调整日志保留天数与最大文件数，自动清理过期日志。
 - **一键更新**：如需强制刷新数据，可在设置中点击“清理本地抓取缓存”。
 
+## 📁 项目结构（整理后）
+- **生产代码**：`src/`
+- **历史原型**：`legacy/prototype-electron/`
+- **研发脚本**：`tools/research/`
+- **旧版测试脚本**：`tools/legacy-tests/`
+
+说明：当前运行入口为 `src/main/index.js`，打包内容由 `package.json` 的 `build.files` 控制。
+
 ## 📦 打包产物
 打包产物位于 `dist/HexHelper.exe`，单文件绿色运行，无需安装。

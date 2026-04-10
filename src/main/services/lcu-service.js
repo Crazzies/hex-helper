@@ -1,8 +1,8 @@
 /**
  * LCU (League Client Update) 通信服务
- * 负责通过命令行提取游戏客户端的端口与认证令牌，并监听游戏阶段与英雄选择变化。
+ * 负责提取游戏客户端端口与认证令牌，并监听游戏阶段与英雄选择变化。
  */
-const { execSync } = require('child_process');
+const { execFile } = require('child_process');
 const https = require('https');
 const EventEmitter = require('events');
 const { log } = require('../utils/logger');
@@ -15,40 +15,103 @@ class LcuService extends EventEmitter {
         this.lastPhase = null;
         this.lastChampionId = null;
         this.pollTimer = null;
+        this.pollBusy = false;
+        this.connectBusy = false;
+
+        this.pollIntervalMs = 3000;
+        this.minReconnectMs = 3000;
+        this.maxReconnectMs = 15000;
+        this.reconnectDelayMs = this.minReconnectMs;
+        this.nextConnectAt = 0;
+    }
+
+    parseLcuCommandLine(stdout) {
+        if (!stdout) return null;
+        const portMatch = stdout.match(/--app-port=(\d+)/);
+        const tokenMatch = stdout.match(/--remoting-auth-token=([\w-]+)/);
+        if (!portMatch || !tokenMatch) return null;
+        return {
+            port: portMatch[1],
+            auth: Buffer.from(`riot:${tokenMatch[1]}`).toString('base64')
+        };
+    }
+
+    execCommand(file, args, timeout = 1500) {
+        return new Promise(resolve => {
+            execFile(
+                file,
+                args,
+                {
+                    windowsHide: true,
+                    timeout,
+                    maxBuffer: 1024 * 1024
+                },
+                (error, stdout) => {
+                    if (error || !stdout) {
+                        resolve('');
+                        return;
+                    }
+                    resolve(stdout.toString());
+                }
+            );
+        });
+    }
+
+    async queryLeagueCommandLine() {
+        // 优先 PowerShell (新系统更稳定)，失败时回退 WMIC。
+        const psScript = "$p = Get-CimInstance Win32_Process -Filter \"name='LeagueClientUx.exe'\" | Select-Object -ExpandProperty CommandLine; if ($p) { $p }";
+        const fromPowerShell = await this.execCommand('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psScript]);
+        if (fromPowerShell && fromPowerShell.includes('--app-port=')) {
+            return fromPowerShell;
+        }
+        return this.execCommand('cmd.exe', ['/d', '/s', '/c', 'wmic process where name="LeagueClientUx.exe" get commandline']);
+    }
+
+    markDisconnected(reason = '') {
+        if (!this.lcuData) return;
+        this.lcuData = null;
+        this.lastChampionId = null;
+        if (reason) log('LCU', `Disconnected: ${reason}`);
+        else log('LCU', 'Disconnected.');
+        this.emit('disconnected');
     }
 
     /**
-     * 自动通过命令行提取 LCU 连接凭证
-     * 原理：LeagueClientUx.exe 启动时会在命令行参数中包含 --app-port 和 --remoting-auth-token
+     * 异步获取 LCU 连接凭证，避免阻塞 Electron 主线程。
      */
     async connect() {
-        try {
-            const command = 'wmic process where name="LeagueClientUx.exe" get commandline';
-            const stdout = execSync(command).toString();
-            const portMatch = stdout.match(/--app-port=([0-9]+)/);
-            const tokenMatch = stdout.match(/--remoting-auth-token=([\w-]+)/);
+        if (process.platform !== 'win32') return false;
+        if (this.connectBusy) return !!this.lcuData;
 
-            if (portMatch && tokenMatch) {
-                const newData = {
-                    port: portMatch[1],
-                    auth: Buffer.from(`riot:${tokenMatch[1]}`).toString('base64')
-                };
-                
-                if (!this.lcuData) {
-                    this.lcuData = newData;
-                    log('LCU', 'Connected to League Client.');
-                    this.emit('connected', this.lcuData);
-                }
-                return true;
+        this.connectBusy = true;
+        try {
+            const stdout = await this.queryLeagueCommandLine();
+            const newData = this.parseLcuCommandLine(stdout);
+            if (!newData) {
+                this.markDisconnected('League Client not found');
+                return false;
             }
+
+            const changed =
+                !this.lcuData ||
+                this.lcuData.port !== newData.port ||
+                this.lcuData.auth !== newData.auth;
+
+            this.lcuData = newData;
+            this.reconnectDelayMs = this.minReconnectMs;
+            this.nextConnectAt = 0;
+
+            if (changed) {
+                log('LCU', 'Connected to League Client.');
+                this.emit('connected', this.lcuData);
+            }
+            return true;
         } catch (e) {
-            if (this.lcuData) {
-                this.lcuData = null;
-                log('LCU', 'Disconnected.');
-                this.emit('disconnected');
-            }
+            this.markDisconnected(e.message);
+            return false;
+        } finally {
+            this.connectBusy = false;
         }
-        return false;
     }
 
     /**
@@ -57,6 +120,13 @@ class LcuService extends EventEmitter {
     async request(url) {
         if (!this.lcuData) return null;
         return new Promise((resolve) => {
+            let settled = false;
+            const done = (value) => {
+                if (settled) return;
+                settled = true;
+                resolve(value);
+            };
+
             const options = {
                 method: 'GET',
                 headers: {
@@ -65,6 +135,7 @@ class LcuService extends EventEmitter {
                 },
                 agent: this.agent
             };
+
             const req = https.request(`https://127.0.0.1:${this.lcuData.port}${url}`, options, (res) => {
                 const chunks = [];
                 res.on('data', (chunk) => chunks.push(chunk));
@@ -72,34 +143,52 @@ class LcuService extends EventEmitter {
                     const data = Buffer.concat(chunks).toString('utf8');
                     if (res.statusCode && res.statusCode >= 400) {
                         log('LCU', `Request failed ${res.statusCode} for ${url}`);
-                        resolve(null);
+                        done(null);
                         return;
                     }
                     try {
-                        resolve(JSON.parse(data));
+                        done(JSON.parse(data));
                     } catch (e) {
                         log('LCU', `JSON parse error for ${url}: ${e.message}`);
-                        resolve(null);
+                        done(null);
                     }
                 });
             });
-            req.on('error', () => resolve(null));
+
+            req.setTimeout(1500, () => {
+                req.destroy(new Error('timeout'));
+            });
+            req.on('error', () => done(null));
             req.end();
         });
     }
 
-    /**
-     * 开启心跳轮询，监听阶段切换与英雄选择
-     */
-    startPolling() {
-        if (this.pollTimer) return;
-        this.pollTimer = setInterval(async () => {
-            const connected = await this.connect();
-            if (!connected) return;
+    async pollTick() {
+        if (this.pollBusy) return;
+        this.pollBusy = true;
+        try {
+            if (!this.lcuData) {
+                const now = Date.now();
+                if (now < this.nextConnectAt) return;
+                const connected = await this.connect();
+                if (!connected) {
+                    this.nextConnectAt = now + this.reconnectDelayMs;
+                    this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, this.maxReconnectMs);
+                    return;
+                }
+            }
 
             // 1. 监听游戏流阶段 (Lobby -> ChampSelect -> InProgress)
-            const phase = await this.request('/lol-gameflow/v1/gameflow-phase');
-            if (phase && phase !== this.lastPhase) {
+            const phaseRaw = await this.request('/lol-gameflow/v1/gameflow-phase');
+            const phase = typeof phaseRaw === 'string' ? phaseRaw : (phaseRaw?.phase || null);
+            if (!phase) {
+                this.markDisconnected('LCU request failed');
+                this.nextConnectAt = Date.now() + this.minReconnectMs;
+                this.reconnectDelayMs = this.minReconnectMs;
+                return;
+            }
+
+            if (phase !== this.lastPhase) {
                 this.lastPhase = phase;
                 this.emit('phase-changed', phase);
                 log('LCU', `Phase changed: ${phase}`);
@@ -116,7 +205,20 @@ class LcuService extends EventEmitter {
             } else {
                 this.lastChampionId = null;
             }
-        }, 3000); // 3秒/次的心跳检测，在性能与实时性间取得平衡
+        } finally {
+            this.pollBusy = false;
+        }
+    }
+
+    /**
+     * 开启心跳轮询，监听阶段切换与英雄选择。
+     */
+    startPolling() {
+        if (this.pollTimer) return;
+        this.pollTimer = setInterval(() => {
+            this.pollTick();
+        }, this.pollIntervalMs);
+        this.pollTick();
     }
 }
 

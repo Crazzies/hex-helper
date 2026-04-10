@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { uIOhook, UiohookKey } = require('uiohook-napi');
@@ -7,8 +7,6 @@ const dataService = require('./services/data-service');
 const scraper = require('./services/scraper-service');
 const config = require('./services/config-service');
 const { log, chcp, readLog, getLogFilePath, setLogOptions } = require('./utils/logger');
-
-app.commandLine.appendSwitch('ignore-certificate-errors');
 
 let mainWindow;
 let tray = null;
@@ -19,6 +17,7 @@ let dragHookStarted = false;
 let dragKeyActive = false;
 let lastToggleAt = 0;
 let lastBenchData = [];
+let lastBenchFingerprint = '';
 const TOGGLE_COOLDOWN_MS = 350;
 
 function applyClickThrough(enabled) {
@@ -133,8 +132,6 @@ function createWindow() {
         log('Main', `Renderer process gone: ${details.reason}`);
     });
 
-    // 监听鼠标事件用于拖动
-    mainWindow.on('moved', () => { isDragging = false; });
 }
 
 function createTray() {
@@ -151,6 +148,7 @@ function createTray() {
         { label: '打开设置面板', click: () => openSettings() },
         { label: '重置位置', click: () => mainWindow.setPosition(1600, 100) },
         { label: '查看日志', click: () => showLogDialog() },
+        { label: '查看日志目录', click: () => showLogDirectory() },
         { type: 'separator' },
         { label: '退出程序', click: () => { app.isQuiting = true; app.quit(); } }
     ]);
@@ -196,9 +194,14 @@ function showLogDialog() {
         defaultId: 0
     }).then(result => {
         if (result.response === 1) {
-            require('electron').shell.openPath(logPath);
+            shell.openPath(logPath);
         }
     });
+}
+
+function showLogDirectory() {
+    const logDir = path.dirname(getLogFilePath());
+    shell.openPath(logDir);
 }
 
 // 注册快捷键
@@ -322,10 +325,6 @@ app.whenReady().then(async () => {
 
     lcu.on('phase-changed', (phase) => handlePhaseChange(phase));
 
-    setInterval(() => {
-        if (lcu.lastPhase) handlePhaseChange(lcu.lastPhase);
-    }, 5000);
-
     let buildFetchInFlight = false;
 
     async function handlePhaseChange(phase) {
@@ -335,6 +334,10 @@ app.whenReady().then(async () => {
             if (lastHeroBuildId !== null) {
                 mainWindow.webContents.send('reset-ui');
                 lastHeroBuildId = null;
+            }
+            if (phase !== 'ChampSelect') {
+                lastBenchFingerprint = '';
+                lastBenchData = [];
             }
         }
         
@@ -367,9 +370,9 @@ app.whenReady().then(async () => {
     }
 
     async function updateBenchData() {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
         const session = await lcu.request('/lol-champ-select/v1/session');
         if (!session || typeof session !== 'object') {
-            log('Main', 'ChampSelect session unavailable');
             // fallback: use current champion id if available
             if (lcu.lastChampionId && lcu.lastChampionId > 0) {
                 const hero = dataService.winRates[lcu.lastChampionId.toString()];
@@ -378,22 +381,29 @@ app.whenReady().then(async () => {
                     name: hero ? hero.name : (champMap[lcu.lastChampionId.toString()] || `ID: ${lcu.lastChampionId}`),
                     winRate: hero ? hero.winRate : '??%'
                 }];
-                lastBenchData = fallbackData;
-                mainWindow.webContents.send('update-bench', fallbackData);
-                log('Main', `Fallback bench data from current champion: ${lcu.lastChampionId}`);
+                const fallbackFingerprint = fallbackData.map(h => `${h.id}:${h.winRate}`).join('|');
+                if (fallbackFingerprint !== lastBenchFingerprint) {
+                    lastBenchFingerprint = fallbackFingerprint;
+                    lastBenchData = fallbackData;
+                    mainWindow.webContents.send('update-bench', fallbackData);
+                }
                 return;
             }
             if (lastBenchData.length > 0) {
                 mainWindow.webContents.send('update-bench', lastBenchData);
             } else {
-                mainWindow.webContents.send('update-bench', [{ name: '等待选人数据...', winRate: '--' }]);
+                const placeholderData = [{ name: '等待选人数据...', winRate: '--' }];
+                const placeholderFingerprint = 'placeholder:waiting';
+                if (placeholderFingerprint !== lastBenchFingerprint) {
+                    lastBenchFingerprint = placeholderFingerprint;
+                    mainWindow.webContents.send('update-bench', placeholderData);
+                }
             }
             return;
         }
 
         const myTeam = Array.isArray(session.myTeam) ? session.myTeam : [];
         const benchChampions = Array.isArray(session.benchChampions) ? session.benchChampions : [];
-        log('Main', `ChampSelect session loaded: team=${myTeam.length}, bench=${benchChampions.length}`);
 
         // 获取我的英雄ID
         const myId = myTeam.find(m => m.cellId === session.localPlayerCellId)?.championId;
@@ -409,7 +419,6 @@ app.whenReady().then(async () => {
         const allIds = [...new Set([myId, ...teamIds, ...benchIds])].filter(id => id);
 
         if (allIds.length === 0) {
-            log('Main', 'ChampSelect session empty');
             // fallback: use current champion id if available
             if (lcu.lastChampionId && lcu.lastChampionId > 0) {
                 const hero = dataService.winRates[lcu.lastChampionId.toString()];
@@ -418,15 +427,23 @@ app.whenReady().then(async () => {
                     name: hero ? hero.name : (champMap[lcu.lastChampionId.toString()] || `ID: ${lcu.lastChampionId}`),
                     winRate: hero ? hero.winRate : '??%'
                 }];
-                lastBenchData = fallbackData;
-                mainWindow.webContents.send('update-bench', fallbackData);
-                log('Main', `Fallback bench data from current champion: ${lcu.lastChampionId}`);
+                const fallbackFingerprint = fallbackData.map(h => `${h.id}:${h.winRate}`).join('|');
+                if (fallbackFingerprint !== lastBenchFingerprint) {
+                    lastBenchFingerprint = fallbackFingerprint;
+                    lastBenchData = fallbackData;
+                    mainWindow.webContents.send('update-bench', fallbackData);
+                }
                 return;
             }
             if (lastBenchData.length > 0) {
                 mainWindow.webContents.send('update-bench', lastBenchData);
             } else {
-                mainWindow.webContents.send('update-bench', [{ name: '暂无英雄数据', winRate: '--' }]);
+                const placeholderData = [{ name: '暂无英雄数据', winRate: '--' }];
+                const placeholderFingerprint = 'placeholder:empty';
+                if (placeholderFingerprint !== lastBenchFingerprint) {
+                    lastBenchFingerprint = placeholderFingerprint;
+                    mainWindow.webContents.send('update-bench', placeholderData);
+                }
             }
             return;
         }
@@ -452,15 +469,25 @@ app.whenReady().then(async () => {
         // 按胜率从高到低排序
         displayData.sort((a, b) => b.winRateNum - a.winRateNum);
 
+        const nextFingerprint = displayData.map(h => `${h.id}:${h.winRate}`).join('|');
+        if (nextFingerprint === lastBenchFingerprint) return;
+
+        lastBenchFingerprint = nextFingerprint;
         lastBenchData = displayData;
         mainWindow.webContents.send('update-bench', displayData);
-        log('Main', `Bench updated: ${displayData.length} heroes`);
     }
 
     // 选人阶段逻辑 - 获取所有队友英雄并按胜率排序
+    let benchUpdateInFlight = false;
     setInterval(async () => {
-        if (lcu.lastPhase === 'ChampSelect') {
-            updateBenchData();
+        if (lcu.lastPhase !== 'ChampSelect' || benchUpdateInFlight) return;
+        benchUpdateInFlight = true;
+        try {
+            await updateBenchData();
+        } catch (e) {
+            log('Main', `updateBenchData failed: ${e.message}`);
+        } finally {
+            benchUpdateInFlight = false;
         }
     }, 2000);
 });
