@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -23,14 +25,56 @@ jobs:
         run: npm run build:win:linux
       - name: Generate SHA256
         run: sha256sum dist/HexHelper.exe > dist/HexHelper.exe.sha256
+      - name: Generate Release Notes
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="${TAG_NAME}"
+          PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${TAG}$" | head -n1 || true)
+          if [ -n "${PREV_TAG}" ]; then
+            RANGE="${PREV_TAG}..${TAG}"
+            COMPARE_URL="https://github.com/${REPO}/compare/${PREV_TAG}...${TAG}"
+            CHANGES="$(git log --pretty='- %s (%h)' "${RANGE}")"
+          else
+            RANGE="${TAG}"
+            COMPARE_URL="https://github.com/${REPO}/releases/tag/${TAG}"
+            CHANGES="$(git log --pretty='- %s (%h)' "${TAG}")"
+          fi
+
+          SHA256_VALUE="$(cut -d' ' -f1 dist/HexHelper.exe.sha256)"
+
+          {
+            echo "# HexHelper ${TAG}"
+            echo
+            echo "## 下载文件"
+            echo "- HexHelper.exe"
+            echo "- HexHelper.exe.sha256"
+            echo
+            echo "## 文件校验（SHA256）"
+            echo "- \`HexHelper.exe\`: \`${SHA256_VALUE}\`"
+            echo
+            echo "## 使用说明"
+            echo "- 双击运行 \`HexHelper.exe\` 即可。"
+            echo "- 如遇系统安全提示，请确认来源后选择继续运行。"
+            echo
+            echo "## 更新内容"
+            if [ -n "${CHANGES}" ]; then
+              echo "${CHANGES}"
+            else
+              echo "- No changes detected."
+            fi
+            echo
+            echo "## 变更对比"
+            echo "- ${COMPARE_URL}"
+          } > RELEASE_NOTES.md
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
-          generate_release_notes: true
-          body: |
-            Automated release for ${{ github.ref_name }}.
+          body_path: RELEASE_NOTES.md
           files: |
             dist/HexHelper.exe
             dist/HexHelper.exe.sha256
